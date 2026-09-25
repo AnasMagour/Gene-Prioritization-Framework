@@ -1,0 +1,10 @@
+% Minimum Redundancy Maximum Relevance (mRMR) Algorithm
+% mRMR algorithm for feature selection using MATLAB
+
+% Loading the required datasets
+X = xlsread('Features_mRMR_(T1D).xlsx'); % The features matrix
+Y = xlsread('Target_mRMR_(T1D).xlsx'); % The output (target) variable
+
+% Building the mRMR algorithm for feature selection
+
+[idx,scores] = fscmrmr(X,Y);

@@ -1,0 +1,32 @@
+% Fisher score for feature selection using MATLAB
+
+% Loading the required datasets
+MA = xlsread('M_A_T1D.xlsx'); % The mean of the ith feature in Standardized T1DM dataset
+MN = xlsread('M_N_T1D.xlsx'); % The mean of the ith feature in Standardized T1DM dataset (Negative)
+MP = xlsread('M_P_T1D.xlsx'); % The mean of the ith feature in Standardized T1DM dataset (Positive)
+STDEVN = xlsread('STDEV_N_T1D.xlsx'); % The standard deviation of the ith feature in Standardized T1DM dataset (Negative)
+STDEVP = xlsread('STDEV_P_T1D.xlsx'); % The standard deviation of the ith feature in Standardized T1DM dataset (Positive)
+F = 50; % Number of features in Standardized T1D dataset
+N = 143; % The size of samples in Standardized T1D dataset (Positive)
+M = 17685; % The size of samples in Standardized T1D dataset (Negative)
+
+% MATLAB code to calculate Fisher score equation numerator
+NUM1 = MP - MA;
+NUM2 = MN - MA;
+for i = 1:F
+A1(i,1) = (NUM1(i,1))^2;
+B1(i,1) = (NUM2(i,1))^2;
+end
+Fisher_score_num = N*A1 + M*B1;
+
+% MATLAB code to calculate Fisher score equation denominator
+for j = 1:F
+A2(j,1) = (STDEVP(j,1))^2;
+B2(j,1) = (STDEVN(j,1))^2;
+end
+Fisher_score_den = N*A2 + M*B2;
+
+%MATLAB code to calculate Fisher score for each feature
+for f = 1:F
+Fisher_score(f,1) = Fisher_score_num(f,1)/Fisher_score_den(f,1);
+end

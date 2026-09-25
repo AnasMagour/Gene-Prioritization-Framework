@@ -1,0 +1,12 @@
+% ReliefF algorithm for feature selection using MATLAB
+
+% Loading the required datasets
+X = xlsread('Features_ReliefF_(T1D).xlsx'); % The features matrix
+if true
+[Z,Y] = xlsread('Target_ReliefF_(T1D).xlsx'); % The output (target) variable
+end
+
+% Building the ReliefF algorithm for feature selection
+
+k = 10; % Number of nearest neighbors
+[idx1,weights1] = relieff(X,Y,k);

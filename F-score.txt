@@ -1,0 +1,51 @@
+% F-score for feature selection using MATLAB
+
+% Loading the required datasets
+MA = xlsread('M_A_T1D.xlsx'); % The mean of the ith feature in Standardized T1D dataset
+MN = xlsread('M_N_T1D.xlsx'); % The mean of the ith feature in Standardized T1D dataset (Control)
+MP = xlsread('M_P_T1D.xlsx'); % The mean of the ith feature in Standardized T1D dataset (Positive)
+ND = xlsread('Standardized T1D dataset (Control).xlsx'); % Standardized T1D dataset (Control)
+PD = xlsread('Standardized T1D dataset (Positive).xlsx'); % Standardized T1D dataset (Positive)
+F = 50; % Number of features in Standardized T1D dataset
+N = 143; % The size of samples in Standardized T1D dataset (Positive)
+M = 17685; % The size of samples in Standardized T1D dataset (Control)
+SUM_PP = 0;
+SUM_NP = 0;
+
+% MATLAB code to calculate F-score equation numerator
+NUM1 = MP - MA;
+NUM2 = MN - MA;
+for i = 1:F
+A1(i,1) = (NUM1(i,1))^2;
+B1(i,1) = (NUM2(i,1))^2;
+end
+F_score_num = A1 + B1;
+
+% MATLAB code to calculate F-score equation denominator
+for x = 1:F
+for y = 1:N
+MPV = MP(x,1);
+PDV = PD(y,x);
+PP = ((PDV - MPV)^2)/(N-1);
+SUM_PP = SUM_PP + PP;
+end
+A2(x,1) = SUM_PP;
+SUM_PP = 0;
+end
+
+for z = 1:F
+for w = 1:M
+MNV = MN(z,1);
+NDV = ND(w,z);
+NP = ((NDV - MNV)^2)/(M-1);
+SUM_NP = SUM_NP + NP;
+end
+B2(z,1) = SUM_NP;
+SUM_NP = 0;
+end
+F_score_den = A2 + B2;
+
+%MATLAB code to calculate F-score for each feature
+for f = 1:F
+F_score(f,1) = F_score_num(f,1)/F_score_den(f,1);
+end
