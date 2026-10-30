@@ -1,0 +1,306 @@
+
+# ============================================================
+# GSE9006: Baseline T1D vs healthy controls
+# Differential expression, candidate genes, and boxplots
+# ============================================================
+
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+
+packages <- c("GEOquery", "Biobase", "limma", "ggplot2")
+
+for (pkg in packages) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    if (pkg %in% c("GEOquery", "Biobase", "limma")) {
+      BiocManager::install(pkg, ask = FALSE, update = FALSE)
+    } else {
+      install.packages(pkg)
+    }
+  }
+}
+
+library(GEOquery)
+library(Biobase)
+library(limma)
+library(ggplot2)
+
+# 1. Download the GEO expression matrices
+gse <- getGEO("GSE9006", GSEMatrix = TRUE)
+
+cat("Number of platforms:", length(gse), "\n")
+
+# 2. Inspect platforms and sample information
+for (i in seq_along(gse)) {
+  eset <- gse[[i]]
+  pd <- pData(eset)
+
+  cat("\nPlatform:", annotation(eset), "\n")
+  cat("Expression dimensions:", dim(exprs(eset)), "\n")
+
+  cols <- intersect(
+    c("geo_accession", "title", "source_name_ch1",
+      "characteristics_ch1"),
+    colnames(pd)
+  )
+
+  print(pd[, cols, drop = FALSE])
+}
+
+# 3. Analyze each platform independently
+candidate_genes <- c("EGF", "MYC")
+
+all_results <- list()
+candidate_results <- list()
+
+for (i in seq_along(gse)) {
+
+  eset <- gse[[i]]
+  pd <- pData(eset)
+  platform <- annotation(eset)
+
+  cat("\n\n====================================\n")
+  cat("Analyzing platform:", platform, "\n")
+  cat("====================================\n")
+
+  # Combine available sample-description fields
+  description_cols <- intersect(
+    c("title", "source_name_ch1", "characteristics_ch1",
+      "characteristics_ch1.1", "characteristics_ch1.2"),
+    colnames(pd)
+  )
+
+  description <- apply(
+    pd[, description_cols, drop = FALSE],
+    1,
+    function(x) paste(x, collapse = " ")
+  )
+
+  description <- tolower(description)
+
+  # Identify healthy controls and newly diagnosed T1D.
+  # Other samples, including T2D and follow-up samples,
+  # are excluded from this baseline comparison.
+  group <- rep(NA_character_, nrow(pd))
+
+  is_control <- grepl("healthy|normal control", description)
+
+  is_baseline_t1d <- grepl(
+    "t1d_new|t1d new|type 1 diabetes.*newly diagnosed",
+    description
+  )
+
+  group[is_control] <- "Control"
+  group[is_baseline_t1d & !is_control] <- "T1D"
+
+  # Inspect classifications before analysis
+  sample_check <- data.frame(
+    sample = pd$geo_accession,
+    title = pd$title,
+    description = description,
+    group = group,
+    stringsAsFactors = FALSE
+  )
+
+  print(sample_check, row.names = FALSE)
+
+  # Stop if sample classification is ambiguous or incomplete.
+  if (anyNA(group)) {
+    warning(
+      "Some samples were not classified on platform ",
+      platform,
+      ". Review sample_check before proceeding."
+    )
+  }
+
+  keep <- !is.na(group)
+  pd <- pd[keep, , drop = FALSE]
+  group <- factor(group[keep], levels = c("Control", "T1D"))
+
+  if (any(table(group) == 0)) {
+    warning("Both groups are not represented on ", platform)
+    next
+  }
+
+  cat("\nGroup counts:\n")
+  print(table(group))
+
+  # 4. Extract expression matrix
+  expr <- exprs(eset)[, keep, drop = FALSE]
+  storage.mode(expr) <- "numeric"
+
+  # GEO processed signals may be on the original intensity scale.
+  # Apply log2 transformation if values are not already log-scale.
+  if (quantile(expr, 0.99, na.rm = TRUE) > 100) {
+    expr <- log2(expr + 1)
+  }
+
+  # 5. Find the gene-symbol annotation column
+  fd <- fData(eset)
+
+  symbol_col <- grep(
+    "gene.?symbol|^symbol$",
+    colnames(fd),
+    ignore.case = TRUE,
+    value = TRUE
+  )
+
+  if (length(symbol_col) == 0) {
+    warning(
+      "No gene-symbol column detected for ", platform,
+      ". Inspect colnames(fData(eset)) and map probe IDs ",
+      "before proceeding."
+    )
+    print(colnames(fd))
+    next
+  }
+
+  # Prefer the most directly named symbol column
+  symbol_col <- symbol_col[
+    order(nchar(symbol_col))
+  ][1]
+
+  gene_symbol <- as.character(fd[[symbol_col]])
+  gene_symbol <- trimws(gene_symbol)
+
+  # Remove missing and blank annotations
+  valid <- !is.na(gene_symbol) &
+    gene_symbol != "" &
+    !grepl("^NA$", gene_symbol, ignore.case = TRUE)
+
+  expr <- expr[valid, , drop = FALSE]
+  gene_symbol <- gene_symbol[valid]
+
+  # Some probes map to multiple genes separated by ///.
+  # Exclude ambiguous mappings rather than assigning them
+  # to a single gene without justification.
+  unambiguous <- !grepl("///|;", gene_symbol)
+
+  expr <- expr[unambiguous, , drop = FALSE]
+  gene_symbol <- gene_symbol[unambiguous]
+
+  # 6. Collapse multiple probes mapping to the same gene
+  # by averaging their log-scale expression values.
+  expr_gene <- avereps(expr, ID = gene_symbol)
+
+  stopifnot(ncol(expr_gene) == length(group))
+
+  # 7. Differential expression using limma
+  design <- model.matrix(~ group)
+
+  fit <- lmFit(expr_gene, design)
+  fit <- eBayes(fit)
+
+  results <- topTable(
+    fit,
+    coef = "groupT1D",
+    number = Inf,
+    adjust.method = "BH",
+    sort.by = "P"
+  )
+
+  results$gene_symbol <- rownames(results)
+
+  all_results[[platform]] <- results
+
+  # Export full differential-expression results
+  write.csv(
+    results,
+    paste0("GSE9006_", platform, "_T1D_vs_Control.csv"),
+    row.names = FALSE
+  )
+
+  cat("\nTop differential-expression results:\n")
+  print(head(results, 10))
+
+  # 8. Extract EGF and MYC results
+  candidate <- results[
+    results$gene_symbol %in% candidate_genes,
+    ,
+    drop = FALSE
+  ]
+
+  candidate_results[[platform]] <- candidate
+
+  cat("\nCandidate-gene results:\n")
+  print(candidate)
+
+  write.csv(
+    candidate,
+    paste0("GSE9006_", platform, "_candidate_genes.csv"),
+    row.names = FALSE
+  )
+
+  # 9. Plot each candidate gene
+  for (gene in candidate_genes) {
+
+    if (!gene %in% rownames(expr_gene)) {
+      cat("\n", gene, "not found on platform", platform, "\n")
+      next
+    }
+
+    plot_data <- data.frame(
+      Expression = as.numeric(expr_gene[gene, ]),
+      Group = group
+    )
+
+    p <- ggplot(
+      plot_data,
+      aes(x = Group, y = Expression, fill = Group)
+    ) +
+      geom_boxplot(
+        width = 0.55,
+        outlier.shape = NA,
+        alpha = 0.65
+      ) +
+      geom_jitter(
+        width = 0.12,
+        alpha = 0.7,
+        size = 2
+      ) +
+      labs(
+        title = paste(gene, "expression:", platform),
+        subtitle = "Baseline T1D vs healthy controls",
+        x = "Group",
+        y = "Log2 expression"
+      ) +
+      theme_classic() +
+      theme(legend.position = "none")
+
+    print(p)
+
+    ggsave(
+      filename = paste0(
+        "GSE9006_", platform, "_", gene, "_boxplot.png"
+      ),
+      plot = p,
+      width = 6,
+      height = 5,
+      dpi = 300
+    )
+  }
+}
+
+# 10. Combine candidate results across platforms
+if (length(candidate_results) > 0) {
+  candidate_summary <- do.call(
+    rbind,
+    lapply(names(candidate_results), function(platform) {
+      x <- candidate_results[[platform]]
+      if (is.null(x) || nrow(x) == 0) return(NULL)
+
+      x$platform <- platform
+      x
+    })
+  )
+
+  if (!is.null(candidate_summary)) {
+    print(candidate_summary)
+
+    write.csv(
+      candidate_summary,
+      "GSE9006_EGF_MYC_all_platforms.csv",
+      row.names = FALSE
+    )
+  }
+}
